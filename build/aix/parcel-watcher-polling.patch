@@ -1,0 +1,178 @@
+Polling subscriptions for @parcel/watcher's brute-force backend.
+
+Upstream's BruteForceBackend only implements snapshots (writeSnapshot /
+getEventsSince); subscribe() and unsubscribe() throw a bare C string. VS Code's
+file watcher always subscribes, and a C string escapes the std::exception
+catch blocks in Backend.cc, so on AIX the extension host died with SIGABRT the
+moment a folder was opened and file changes made outside the editor were never
+picked up.
+
+With BRUTE_FORCE_POLLING defined (our AIX gyp block does), subscribe() takes
+an initial scan and starts one thread per watcher that rescans the tree every
+PARCEL_WATCHER_POLL_INTERVAL_MS (default 2000, minimum 250; the wait stretches
+to 3x the scan time on big trees) and diffs it with DirTree::getChanges, the
+same machinery getEventsSince uses. Errors during a rescan are reported through
+the event stream and polling continues. Without the define the stubs now throw
+std::runtime_error, so a missing backend is an error, not a crash.
+
+Applies to @parcel/watcher v2.5.x.
+
+--- a/src/shared/BruteForceBackend.hh	2026-10-19 15:50:15
++++ b/src/shared/BruteForceBackend.hh	2026-10-19 15:53:45
+@@ -4,22 +4,41 @@
+ #include "../Backend.hh"
+ #include "../DirTree.hh"
+ #include "../Watcher.hh"
++#include <stdexcept>
++#include <unordered_map>
+ 
+ class BruteForceBackend : public Backend {
+ public:
+   void writeSnapshot(WatcherRef watcher, std::string *snapshotPath) override;
+   void getEventsSince(WatcherRef watcher, std::string *snapshotPath) override;
++#ifdef BRUTE_FORCE_POLLING
++  // Polling subscriptions for platforms without a native file-event API
++  // (AIX). One thread per watcher re-reads the directory tree on an interval
++  // and diffs it against the previous scan with DirTree::getChanges.
++  void subscribe(WatcherRef watcher) override;
++  void unsubscribe(WatcherRef watcher) override;
++#else
++  // Throw a std::exception subclass: a bare C string escapes the catch blocks
++  // in Backend.cc and aborts the whole process.
+   void subscribe(WatcherRef watcher) override {
+-    throw "Brute force backend doesn't support subscriptions.";
++    throw std::runtime_error("Brute force backend doesn't support subscriptions.");
+   }
+ 
+   void unsubscribe(WatcherRef watcher) override {
+-    throw "Brute force backend doesn't support subscriptions.";
++    throw std::runtime_error("Brute force backend doesn't support subscriptions.");
+   }
++#endif
+ 
+   std::shared_ptr<DirTree> getTree(WatcherRef watcher, bool shouldRead = true);
+ private:
+   void readTree(WatcherRef watcher, std::shared_ptr<DirTree> tree);
++#ifdef BRUTE_FORCE_POLLING
++  // Poll state per subscribed watcher. Guarded by Backend::mMutex, which is
++  // held whenever subscribe()/unsubscribe() run. (No RTTI in addon builds, so
++  // this is a map rather than a cast from Watcher::state.)
++  std::unordered_map<WatcherRef, std::shared_ptr<struct BruteForcePollState>> mPollers;
++  void pollLoop(WatcherRef watcher, std::shared_ptr<struct BruteForcePollState> state);
++#endif
+ };
+ 
+ #endif
+--- a/src/shared/BruteForceBackend.cc	2026-10-19 15:50:15
++++ b/src/shared/BruteForceBackend.cc	2026-10-19 15:53:45
+@@ -1,8 +1,39 @@
+ #include <string>
++#include <cstdlib>
++#include <cstring>
++#include <stdexcept>
+ #include "../DirTree.hh"
+ #include "../Event.hh"
+ #include "./BruteForceBackend.hh"
+ 
++#ifdef BRUTE_FORCE_POLLING
++#include <atomic>
++#include <chrono>
++#include <thread>
++#include "../Signal.hh"
++
++// Per-watcher state for polling subscriptions.
++struct BruteForcePollState {
++  std::shared_ptr<DirTree> tree;     // last scan, private to this watcher
++  std::thread thread;
++  std::atomic<bool> stop{false};
++  Signal wake;                        // poked by unsubscribe for a prompt exit
++};
++
++// Poll interval in milliseconds. Override with PARCEL_WATCHER_POLL_INTERVAL_MS.
++// Scans that take long automatically stretch the interval so a huge tree can
++// never keep a CPU busy: the next wait is at least three times the scan time.
++static std::chrono::milliseconds pollInterval() {
++  static std::chrono::milliseconds interval = [] {
++    const char *env = std::getenv("PARCEL_WATCHER_POLL_INTERVAL_MS");
++    long ms = env ? std::atol(env) : 0;
++    if (ms < 250) ms = 2000;
++    return std::chrono::milliseconds(ms);
++  }();
++  return interval;
++}
++#endif
++
+ std::shared_ptr<DirTree> BruteForceBackend::getTree(WatcherRef watcher, bool shouldRead) {
+   auto tree = DirTree::getCached(watcher->mDir);
+ 
+@@ -39,3 +70,70 @@
+   now->getChanges(&snapshot, watcher->mEvents);
+   fclose(f);
+ }
++
++#ifdef BRUTE_FORCE_POLLING
++void BruteForceBackend::subscribe(WatcherRef watcher) {
++  // Called with Backend::mMutex held (Backend::watch). Take the initial
++  // snapshot synchronously so a missing/unreadable directory is reported to
++  // the caller as a normal error instead of from the poll thread.
++  auto state = std::make_shared<BruteForcePollState>();
++  state->tree = std::make_shared<DirTree>(watcher->mDir);
++  readTree(watcher, state->tree);
++  state->tree->isComplete = true;
++  mPollers[watcher] = state;
++  state->thread = std::thread([this, watcher, state]() {
++    pollLoop(watcher, state);
++  });
++}
++
++void BruteForceBackend::unsubscribe(WatcherRef watcher) {
++  // Called with Backend::mMutex held. The poll thread never takes that mutex
++  // (it only touches the watcher and its private tree), so joining is safe.
++  auto found = mPollers.find(watcher);
++  if (found == mPollers.end()) {
++    return;
++  }
++  auto state = found->second;
++  mPollers.erase(found);
++  state->stop = true;
++  state->wake.notify();
++  if (state->thread.joinable()) {
++    if (state->thread.get_id() == std::this_thread::get_id()) {
++      state->thread.detach();
++    } else {
++      state->thread.join();
++    }
++  }
++}
++
++void BruteForceBackend::pollLoop(WatcherRef watcher, std::shared_ptr<BruteForcePollState> state) {
++  auto wait = pollInterval();
++  while (!state->stop) {
++    state->wake.waitFor(wait);
++    if (state->stop) {
++      break;
++    }
++
++    auto started = std::chrono::steady_clock::now();
++    auto now = std::make_shared<DirTree>(watcher->mDir);
++    try {
++      readTree(watcher, now);
++    } catch (std::exception &err) {
++      // Transient (directory being replaced, EMFILE...): report once via the
++      // event stream and keep polling; the next successful scan resyncs.
++      watcher->mEvents.error(err.what());
++      watcher->notify();
++      continue;
++    }
++    now->isComplete = true;
++
++    now->getChanges(state->tree.get(), watcher->mEvents);
++    state->tree = now;
++    // notify() only wakes the debouncer when events were queued.
++    watcher->notify();
++
++    auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
++    wait = std::max(pollInterval(), spent * 3);
++  }
++}
++#endif

@@ -1,0 +1,13 @@
+diff --git a/extensions/microsoft-authentication/esbuild.mts b/extensions/microsoft-authentication/esbuild.mts
+index 46a698ed..6dbb181f 100644
+--- a/extensions/microsoft-authentication/esbuild.mts
++++ b/extensions/microsoft-authentication/esbuild.mts
+@@ -21,6 +21,8 @@ switch (process.platform) {
+ 	case 'win32': platformFolder = 'windows'; break;
+ 	case 'darwin': platformFolder = 'macos'; break;
+ 	case 'linux': platformFolder = 'linux'; break;
++	// AIX: no MSAL native runtime is published; use the linux layout (the arch filter below skips the copy)
++	case 'aix': platformFolder = 'linux'; break;
+ 	default: throw new Error(`Unsupported platform: ${process.platform}`);
+ }
+ 

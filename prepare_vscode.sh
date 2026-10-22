@@ -185,6 +185,8 @@ done
 set -x
 
 # {{{ install dependencies
+if [[ "${SKIP_NPM_INSTALL}" != "yes" ]]; then
+
 export ELECTRON_SKIP_BINARY_DOWNLOAD=1
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
@@ -221,6 +223,8 @@ for i in {1..5}; do # try 5 times
 
   sleep $(( 15 * (i + 1)))
 done
+
+fi # SKIP_NPM_INSTALL
 # }}}
 
 # package.json
