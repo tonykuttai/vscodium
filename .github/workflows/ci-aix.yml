@@ -1,0 +1,72 @@
+name: ci-aix
+
+# AIX cannot be built on GitHub-hosted runners, but two things can be checked
+# off-AIX on every push to the aix branch: the build scripts lint, and the
+# patches/aix still apply on top of VSCodium's patches to the VS Code commit
+# that upstream/stable.json pins. The real build runs on an AIX host (see
+# docs/howto-build-aix.md).
+
+on:
+  push:
+    branches: [aix]
+    paths:
+      - 'build/aix/**'
+      - 'patches/**'
+      - 'upstream/stable.json'
+      - 'prepare_vscode.sh'
+      - 'get_repo.sh'
+      - '.github/workflows/ci-aix.yml'
+  pull_request:
+    branches: [aix]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: shellcheck build/aix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y shellcheck
+          shellcheck -S warning -e SC1091 build/aix/*.sh
+          bash -n build/aix/*.sh prepare_vscode.sh get_repo.sh
+
+  patches-apply:
+    name: patches/aix apply to the pinned VS Code commit
+    runs-on: ubuntu-latest
+    env:
+      APP_NAME: VSCodium
+      ASSETS_REPOSITORY: ${{ github.repository }}
+      BINARY_NAME: codium
+      GH_REPO_PATH: ${{ github.repository }}
+      ORG_NAME: VSCodium
+      OS_NAME: aix
+      VSCODE_QUALITY: stable
+      CI_BUILD: 'no'
+      MAX_OLD_SPACE_SIZE: '8192'
+      SKIP_NPM_INSTALL: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: tools
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+      - name: get_repo.sh + prepare_vscode.sh with OS_NAME=aix (VSCodium patches, then patches/aix)
+        # one step: the scripts export variables to each other through the shell
+        run: |
+          . get_repo.sh
+          . version.sh
+          . prepare_vscode.sh
+      - name: show what the aix patches changed
+        run: |
+          cd vscode
+          git status --short -- build/gulpfile.reh.ts build/lib/copilot.ts resources/server extensions/microsoft-authentication/esbuild.mts
+          test -f resources/server/aix-platform-override.cjs
+          test -f resources/server/bin/code-server-aix.sh
+          grep -q "platform: 'aix', arch: 'ppc64'" build/gulpfile.reh.ts
+          grep -q "case 'aix'" extensions/microsoft-authentication/esbuild.mts
