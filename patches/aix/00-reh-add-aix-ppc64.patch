@@ -452,10 +452,10 @@ index 00000000..f1770290
 +unset _vsx_gcc_libpath _vsx_libpath _base _cand
 diff --git a/resources/server/bin/code-server-aix.sh b/resources/server/bin/code-server-aix.sh
 new file mode 100755
-index 00000000..ba5be76f
+index 00000000..39f43b63
 --- /dev/null
 +++ b/resources/server/bin/code-server-aix.sh
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,22 @@
 +#!/usr/bin/env sh
 +#
 +# Copyright (c) Microsoft Corporation. All rights reserved.
@@ -471,15 +471,19 @@ index 00000000..ba5be76f
 +ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 +. "$ROOT/bin/aix-env.sh"
 +
++# The bundled runtime unless VSCODIUM_AIX_NODE names another node of the same major
++# (the addons are compiled against this release's Node ABI).
++NODE_BIN="${VSCODIUM_AIX_NODE:-$ROOT/node}"
++
 +# No exec, like the Linux launcher: tools that look for bin/<app>-server in the process list
 +# (the remote extension does) must still find it.
-+"$ROOT/node" ${INSPECT:-} -r "$ROOT/aix-platform-override.cjs" "$ROOT/out/server-main.js" "$@"
++"$NODE_BIN" ${INSPECT:-} -r "$ROOT/aix-platform-override.cjs" "$ROOT/out/server-main.js" "$@"
 diff --git a/resources/server/bin/helpers/browser-aix.sh b/resources/server/bin/helpers/browser-aix.sh
 new file mode 100755
-index 00000000..8d2070a2
+index 00000000..dfc7fbf5
 --- /dev/null
 +++ b/resources/server/bin/helpers/browser-aix.sh
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,14 @@
 +#!/usr/bin/env sh
 +#
 +# Copyright (c) Microsoft Corporation. All rights reserved.
@@ -492,13 +496,14 @@ index 00000000..8d2070a2
 +COMMIT="@@COMMIT@@"
 +EXEC_NAME="@@APPNAME@@"
 +CLI_SCRIPT="$ROOT/out/server-cli.js"
-+exec "$ROOT/node" -r "$ROOT/aix-platform-override.cjs" "$CLI_SCRIPT" "$APP_NAME" "$VERSION" "$COMMIT" "$EXEC_NAME" "--openExternal" "$@"
++NODE_BIN="${VSCODIUM_AIX_NODE:-$ROOT/node}"
++exec "$NODE_BIN" -r "$ROOT/aix-platform-override.cjs" "$CLI_SCRIPT" "$APP_NAME" "$VERSION" "$COMMIT" "$EXEC_NAME" "--openExternal" "$@"
 diff --git a/resources/server/bin/remote-cli/code-aix.sh b/resources/server/bin/remote-cli/code-aix.sh
 new file mode 100755
-index 00000000..b2a3bc83
+index 00000000..c0f0fe4d
 --- /dev/null
 +++ b/resources/server/bin/remote-cli/code-aix.sh
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,14 @@
 +#!/usr/bin/env sh
 +#
 +# Copyright (c) Microsoft Corporation. All rights reserved.
@@ -511,4 +516,5 @@ index 00000000..b2a3bc83
 +COMMIT="@@COMMIT@@"
 +EXEC_NAME="@@APPNAME@@"
 +CLI_SCRIPT="$ROOT/out/server-cli.js"
-+exec "$ROOT/node" -r "$ROOT/aix-platform-override.cjs" "$CLI_SCRIPT" "$APP_NAME" "$VERSION" "$COMMIT" "$EXEC_NAME" "$@"
++NODE_BIN="${VSCODIUM_AIX_NODE:-$ROOT/node}"
++exec "$NODE_BIN" -r "$ROOT/aix-platform-override.cjs" "$CLI_SCRIPT" "$APP_NAME" "$VERSION" "$COMMIT" "$EXEC_NAME" "$@"
