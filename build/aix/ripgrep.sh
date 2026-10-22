@@ -51,7 +51,8 @@ if [[ -x "${CACHE}/rg" ]]; then
 fi
 
 WORK="$( mktemp -d "${TMPDIR:-/tmp}/ripgrep-aix.XXXXXX" )"
-trap 'rm -rf "${WORK}"' EXIT
+# leave the tree before removing it: AIX refuses to remove a process's current directory
+trap 'cd / && rm -rf "${WORK}" || true' EXIT
 cd "${WORK}"
 for t in "${TAG}" "v${TAG}"; do
   git clone -q --depth 1 --branch "${t}" https://github.com/BurntSushi/ripgrep.git src 2> /dev/null && break
