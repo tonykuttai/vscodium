@@ -4,9 +4,15 @@ name: test-node-linux
 # upstream/stable.json pins, with VSCodium's patches applied. The same tests run
 # on the AIX build host by hand; this job answers "does that test also fail on
 # Linux?" so AIX-specific failures can be told apart from upstream or
-# VSCodium-specific ones. Manual only: it takes about half an hour.
+# VSCodium-specific ones. Runs when this file is pushed (gh cannot dispatch a
+# workflow that is not on the default branch) and on manual dispatch; about
+# half an hour.
 
 on:
+  push:
+    branches: [aix]
+    paths:
+      - '.github/workflows/test-node-linux.yml'
   workflow_dispatch:
     inputs:
       run_glob:
@@ -62,8 +68,8 @@ jobs:
         working-directory: vscode
         run: |
           set +e
-          if [ -n "${{ github.event.inputs.run_glob }}" ]; then
-            node --max-old-space-size=8192 test/unit/node/index.js --runGlob '${{ github.event.inputs.run_glob }}' 2>&1 | tee ../test-node.log
+          if [ -n "${{ github.event.inputs.run_glob || '' }}" ]; then
+            node --max-old-space-size=8192 test/unit/node/index.js --runGlob '${{ github.event.inputs.run_glob || '' }}' 2>&1 | tee ../test-node.log
           else
             node --max-old-space-size=8192 test/unit/node/index.js 2>&1 | tee ../test-node.log
           fi
