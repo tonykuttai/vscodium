@@ -92,9 +92,6 @@ for i in {1..5}; do
   echo "Npm install failed $i, trying again..."
 done
 
-# big-endian build-tooling fixes (nothing shipped is touched)
-../build/aix/fix-build-tools.sh .
-
 # The addons must be linked against the import file (node.exp) of the exact Node we bundle: on AIX
 # node-gyp resolves C++ template symbols that the executable exports through node.exp, and it takes
 # node.exp from the *running* node's tree (not from --nodedir). So fetch the full target runtime once

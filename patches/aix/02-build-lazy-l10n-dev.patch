@@ -1,0 +1,54 @@
+diff --git a/build/lib/i18n.ts b/build/lib/i18n.ts
+index fd85e54c..882e9c6d 100644
+--- a/build/lib/i18n.ts
++++ b/build/lib/i18n.ts
+@@ -11,11 +11,21 @@ import File from 'vinyl';
+ import xml2js from 'xml2js';
+ import fancyLog from 'fancy-log';
+ import ansiColors from 'ansi-colors';
+-import { type l10nJsonFormat, getL10nXlf, type l10nJsonDetails, getL10nFilesFromXlf, getL10nJson } from '@vscode/l10n-dev';
++import type { l10nJsonFormat, l10nJsonDetails } from '@vscode/l10n-dev';
++import { createRequire } from 'node:module';
+ import { serializeNlsData } from './nlsMessages.ts';
+ 
+ const REPO_ROOT_PATH = path.join(import.meta.dirname, '../..');
+ 
++// @vscode/l10n-dev initialises web-tree-sitter (Emscripten wasm glue that assumes a little-endian
++// host) when it is imported. Load it on first use so that build tasks which never touch XLF files
++// or l10n bundles (the server build, for example) also run on big-endian hosts such as AIX ppc64.
++let l10nDevModule: typeof import('@vscode/l10n-dev') | undefined;
++function l10nDev(): typeof import('@vscode/l10n-dev') {
++	l10nDevModule ??= createRequire(import.meta.url)('@vscode/l10n-dev');
++	return l10nDevModule!;
++}
++
+ function log(message: any, ...rest: unknown[]): void {
+ 	fancyLog(ansiColors.green('[i18n]'), message, ...rest);
+ }
+@@ -495,7 +505,7 @@ function createL10nBundleForExtension(extensionFolderName: string, prefixWithBui
+ 			const extension = path.extname(file.relative);
+ 			if (extension !== '.json') {
+ 				const contents = file.contents.toString('utf8');
+-				getL10nJson([{ contents, extension }])
++				l10nDev().getL10nJson([{ contents, extension }])
+ 					.then((json) => {
+ 						callback(undefined, new File({
+ 							path: `extensions/${extensionFolderName}/bundle.l10n.json`,
+@@ -609,7 +619,7 @@ export function createXlfFilesForExtensions(): eventStream.ThroughStream {
+ 			if (_l10nMap?.size > 0) {
+ 				const xlfFile = new File({
+ 					path: path.join(extensionsProject, extensionId + '.xlf'),
+-					contents: Buffer.from(getL10nXlf(_l10nMap), 'utf8')
++					contents: Buffer.from(l10nDev().getL10nXlf(_l10nMap), 'utf8')
+ 				});
+ 				folderStream.queue(xlfFile);
+ 			}
+@@ -749,7 +759,7 @@ export function prepareI18nPackFiles(resultingTranslationPaths: TranslationPath[
+ 		}
+ 		const contents = xlf.contents!.toString();
+ 		log(`Found ${project}: ${resource}`);
+-		const parsePromise = getL10nFilesFromXlf(contents);
++		const parsePromise = l10nDev().getL10nFilesFromXlf(contents);
+ 		parsePromises.push(parsePromise);
+ 		parsePromise.then(
+ 			resolvedFiles => {

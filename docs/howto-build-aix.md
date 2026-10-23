@@ -44,18 +44,20 @@ SKIP_NPM_INSTALL=yes . prepare_vscode.sh    # VSCodium patches + patches/aix, pr
 `build/aix/package_reh.sh` does, in order:
 
 1. `npm ci --prefix build`, root `npm ci --ignore-scripts` (client-only natives are not needed).
-2. `build/aix/fix-build-tools.sh`: defers `@vscode/l10n-dev`'s tree-sitter wasm initialisation
-   (Emscripten glue is little-endian only; the REH build never uses that parser).
-3. `remote/`: `npm ci --ignore-scripts`, `build/aix/fix-node-modules.sh` (node-pty AIX patch +
+2. `remote/`: `npm ci --ignore-scripts`, `build/aix/fix-node-modules.sh` (node-pty AIX patch +
    libutil, @parcel/watcher aix gyp block + `d_type` + polling patch, kerberos `_AIX` + krb5-config libs, deviceid, `rg` into
    `bin/aix-ppc64/`), then `npm rebuild` against the target Node from `remote/.npmrc` with
    `~/.gyp/include.gypi` (`-fPIC -ftls-model=global-dynamic`, no `-fstack-protector-strong`).
-4. `npm ci` in every other directory of `build/npm/dirs.ts`.
-5. `npm run gulp vscode-reh-aix-ppc64-min` (downloads the official nodejs.org `aix-ppc64` runtime; set
+3. `npm ci` in every other directory of `build/npm/dirs.ts`.
+4. `npm run gulp vscode-reh-aix-ppc64-min` (downloads the official nodejs.org `aix-ppc64` runtime; set
    `GITHUB_TOKEN`, the built-in extensions come from GitHub releases and the anonymous API limit is 60/h).
-6. `build/aix/verify_reh.sh`: every addon is 64-bit XCOFF and loads, `rg` runs, the server reaches
+5. `build/aix/verify_reh.sh`: every addon is 64-bit XCOFF and loads, `rg` runs, the server reaches
    "Extension host agent listening".
-7. `assets/vscodium-reh-aix-ppc64-<RELEASE_VERSION>.tar.gz` + `.sha256`/`.sha1`.
+6. `assets/vscodium-reh-aix-ppc64-<RELEASE_VERSION>.tar.gz` + `.sha256`/`.sha1`.
+
+Big-endian build hosts: `patches/aix/02-build-lazy-l10n-dev.patch` (applied by `prepare_vscode.sh` with the other
+`patches/aix`) makes `build/lib/i18n.ts` load `@vscode/l10n-dev` on first use. That package initialises web-tree-sitter
+at import time with Emscripten glue that assumes a little-endian host; the server build never uses it.
 
 ## What the package contains that Linux does not
 
