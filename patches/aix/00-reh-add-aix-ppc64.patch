@@ -406,7 +406,7 @@ new file mode 100755
 index 00000000..f1770290
 --- /dev/null
 +++ b/resources/server/bin/aix-env.sh
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,57 @@
 +# AIX runtime environment for the server. Sourced (not executed) by
 +# bin/<app>-server, bin/remote-cli/<app> and bin/helpers/browser.sh. The caller sets $ROOT.
 +#
@@ -449,6 +449,13 @@ index 00000000..f1770290
 +# tiers up tree-sitter grammars; Liftoff alone runs them correctly.
 +: "${VSCODIUM_AIX_NODE_FLAGS=--liftoff-only}"
 +export VSCODIUM_AIX_NODE_FLAGS
++
++# Workspace file watching is polling (@parcel/watcher built with BRUTE_FORCE_POLLING). Measured on
++# AIX 7.3/POWER9: a rescan costs ~0.15 ms per file (10k files: 1.5 s, 170k: 4.6 s) and the backend
++# waits at least 3x the scan time, so big trees pace themselves; 1000 ms (upstream default 2000)
++# halves the latency for small and medium workspaces at negligible cost. Users may override.
++: "${PARCEL_WATCHER_POLL_INTERVAL_MS=1000}"
++export PARCEL_WATCHER_POLL_INTERVAL_MS
 +
 +# GNU userland first: the server shells out to tar/find/ps etc.
 +case ":$PATH:" in
