@@ -1,6 +1,6 @@
 # Building the Remote Extension Host for IBM AIX (aix-ppc64)
 
-> Proven on AIX 7.3 TL4 (wyvernden6aix73) with VSCodium 1.140.06880, 2026-10-23: the published
+> Proven on an AIX 7.3 TL4 POWER10 host with VSCodium 1.140.06880, 2026-10-23: the published
 > `vscodium-reh-aix-ppc64-1.140.06880.tar.gz` on [tonykuttai/vscodium-aix-server](https://github.com/tonykuttai/vscodium-aix-server/releases)
 > is built this way by the runner described there.
 
