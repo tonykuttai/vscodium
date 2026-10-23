@@ -116,6 +116,36 @@ else
   echo "verify_reh: node-pty spawn failed: ${PTY_OUT}" >&2; exit 1
 fi
 
+# 1e. wasm under the launcher's V8 flags: on ppc64 TurboFan aborts the process ("Fatal process out
+# of memory: Zone") when it tiers up tree-sitter grammars; the launchers pass VSCODIUM_AIX_NODE_FLAGS
+# (default --liftoff-only, set by aix-env.sh) so this loop must survive and exit cleanly.
+TSW="${REH}/node_modules/@vscode/tree-sitter-wasm/wasm"
+if [[ -f "${TSW}/tree-sitter.js" && ( -f "${TSW}/tree-sitter-powershell.wasm" || -f "${TSW}/tree-sitter-bash.wasm" ) ]]; then
+  WASMDIR="$( mktemp -d "${TMPDIR:-/tmp}/verify_reh_wasm.XXXXXX" )"
+  cat > "${WASMDIR}/loop.mjs" <<'JS'
+import { pathToFileURL } from 'url';
+const [,, wasmdir, n] = process.argv;
+const mod = await import(pathToFileURL(wasmdir + '/tree-sitter.js').href); const TS = mod.default ?? mod;
+await TS.Parser.init({ locateFile: () => wasmdir + '/tree-sitter.wasm' });
+// the PowerShell grammar is what trips TurboFan (bash alone does not); use it when present
+const grammar = wasmdir + (await import('fs')).existsSync(wasmdir + '/tree-sitter-powershell.wasm') ? '/tree-sitter-powershell.wasm' : '/tree-sitter-bash.wasm';
+const lang = await TS.Language.load(wasmdir + grammar);
+const p = new TS.Parser(); p.setLanguage(lang); let ok = 0;
+for (let i = 0; i < Number(n); i++) { const t = p.parse(grammar.includes('powershell') ? `Get-ChildItem -Path C:\\x${i} | Where-Object { $_.Length -gt ${i} } > $null` : `echo hi${i} | grep -E "a|b" > out${i}.txt`); if (t.rootNode) { ok++; } t.delete(); }
+console.log('parsed ' + ok); setTimeout(() => console.log('WASM_OK'), 8000);
+JS
+  # shellcheck disable=SC2086  # the flags are meant to split
+  WASM_OUT="$( "${NODE}" ${VSCODIUM_AIX_NODE_FLAGS:-} "${WASMDIR}/loop.mjs" "${TSW}" 1000 2>&1 | tail -1 || true )"
+  rm -rf "${WASMDIR}"
+  if [[ "${WASM_OUT}" == "WASM_OK" ]]; then
+    echo "verify_reh: wasm tier-up survives under node flags '${VSCODIUM_AIX_NODE_FLAGS:-}'"
+  else
+    echo "verify_reh: wasm loop failed under node flags '${VSCODIUM_AIX_NODE_FLAGS:-}': ${WASM_OUT:-process aborted (V8 TurboFan on ppc64: 'Fatal process out of memory: Zone')}" >&2; exit 1
+  fi
+else
+  echo "verify_reh: no @vscode/tree-sitter-wasm in the package, wasm check skipped"
+fi
+
 # 2. ripgrep
 RG="${REH}/node_modules/@vscode/ripgrep-universal/bin/aix-ppc64/rg"
 [[ -x "${RG}" ]] || { echo "verify_reh: ${RG} missing" >&2; exit 1; }

@@ -406,7 +406,7 @@ new file mode 100755
 index 00000000..f1770290
 --- /dev/null
 +++ b/resources/server/bin/aix-env.sh
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,50 @@
 +# AIX runtime environment for the server. Sourced (not executed) by
 +# bin/<app>-server, bin/remote-cli/<app> and bin/helpers/browser.sh. The caller sets $ROOT.
 +#
@@ -443,6 +443,13 @@ index 00000000..f1770290
 +    *) NODE_OPTIONS="--require $ROOT/aix-platform-override.cjs${NODE_OPTIONS:+ $NODE_OPTIONS}"; export NODE_OPTIONS ;;
 +esac
 +
++# V8 flags for every node the launchers start; child processes (extension host, pty host, file
++# watcher) inherit them through process.execArgv. Not settable in NODE_OPTIONS. On ppc64 (big
++# endian) TurboFan's wasm compiler aborts the process ("Fatal process out of memory: Zone") when it
++# tiers up tree-sitter grammars; Liftoff alone runs them correctly.
++: "${VSCODIUM_AIX_NODE_FLAGS=--liftoff-only}"
++export VSCODIUM_AIX_NODE_FLAGS
++
 +# GNU userland first: the server shells out to tar/find/ps etc.
 +case ":$PATH:" in
 +    *:/opt/freeware/bin:*) ;;
@@ -477,7 +484,7 @@ index 00000000..39f43b63
 +
 +# No exec, like the Linux launcher: tools that look for bin/<app>-server in the process list
 +# (the remote extension does) must still find it.
-+"$NODE_BIN" ${INSPECT:-} -r "$ROOT/aix-platform-override.cjs" "$ROOT/out/server-main.js" "$@"
++"$NODE_BIN" ${INSPECT:-} ${VSCODIUM_AIX_NODE_FLAGS:-} -r "$ROOT/aix-platform-override.cjs" "$ROOT/out/server-main.js" "$@"
 diff --git a/resources/server/bin/helpers/browser-aix.sh b/resources/server/bin/helpers/browser-aix.sh
 new file mode 100755
 index 00000000..dfc7fbf5
