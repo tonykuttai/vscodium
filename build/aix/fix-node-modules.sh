@@ -72,6 +72,10 @@ fi
 # backend cannot subscribe() (it throws a bare C string, which escapes Backend.cc's std::exception
 # handlers and aborts the File Watcher process; VS Code then falls back to fs.watch = AHAFS on AIX).
 # parcel-watcher-polling.patch adds polling subscriptions behind BRUTE_FORCE_POLLING.
+# No Watchman backend: resolving the "default" backend first asks WatchmanBackend::checkAvailable(),
+# which popen()s "watchman get-sockname"; without watchman the probe throws before pclose() and
+# leaves a zombie sh in every File Watcher process (VS Code asks for "inotify" because the shim
+# reports linux, parcel then falls back to "default"). Brute force is the only backend we want.
 # Upstream fix: an OS=="aix" block, the stat() fallback in legacy.cc, and the polling backend.
 if [[ -d "${NM}/@parcel/watcher" ]]; then
   pushd "${NM}/@parcel/watcher" > /dev/null
@@ -90,12 +94,10 @@ if 'OS=="aix"' not in text:
     aix_block = """
         ['OS=="aix"', {
           "sources": [
-            "src/watchman/BSER.cc",
-            "src/watchman/WatchmanBackend.cc",
             "src/shared/BruteForceBackend.cc",
             "src/unix/legacy.cc"
           ],
-          "defines": [ "WATCHMAN", "BRUTE_FORCE", "BRUTE_FORCE_POLLING" ],
+          "defines": [ "BRUTE_FORCE", "BRUTE_FORCE_POLLING" ],
           'cflags!': [ '-fstack-protector-strong' ],
           'cflags_cc!': [ '-fstack-protector-strong' ],
           'cflags_cc': [ '-std=c++17' ]
@@ -110,11 +112,21 @@ data = ast.literal_eval(open(path).read())
 assert any('OS=="aix"' in str(t.get("conditions", "")) for t in data.get("targets", [])), "AIX block missing"
 PY
 
-  # trees patched by an earlier revision of this script: add the polling define to the aix block
-  if grep -q 'OS=="aix"' binding.gyp && ! grep -q 'BRUTE_FORCE_POLLING' binding.gyp; then
-    sed -i 's/"defines": \[ "WATCHMAN", "BRUTE_FORCE" \]/"defines": [ "WATCHMAN", "BRUTE_FORCE", "BRUTE_FORCE_POLLING" ]/' binding.gyp
-    grep -q 'BRUTE_FORCE_POLLING' binding.gyp || { echo "@parcel/watcher: could not add BRUTE_FORCE_POLLING to binding.gyp" >&2; exit 1; }
-    echo "@parcel/watcher: BRUTE_FORCE_POLLING added to the existing aix block"
+  # trees patched by an earlier revision of this script: drop Watchman from the aix block and make
+  # sure the polling define is there
+  if grep -q 'OS=="aix"' binding.gyp && grep -q '"WATCHMAN", "BRUTE_FORCE"' binding.gyp; then
+    python3 - binding.gyp <<'PY2'
+import re, sys
+path = sys.argv[1]; text = open(path).read()
+start = text.index('OS=="aix"'); end = text.index('}]', start)
+block = text[start:end]
+block = re.sub(r'\s*"src/watchman/(BSER|WatchmanBackend)\.cc",', '', block)
+block = block.replace('"defines": [ "WATCHMAN", "BRUTE_FORCE", "BRUTE_FORCE_POLLING" ]', '"defines": [ "BRUTE_FORCE", "BRUTE_FORCE_POLLING" ]')
+block = block.replace('"defines": [ "WATCHMAN", "BRUTE_FORCE" ]', '"defines": [ "BRUTE_FORCE", "BRUTE_FORCE_POLLING" ]')
+open(path, "w").write(text[:start] + block + text[end:])
+print("@parcel/watcher: Watchman removed from the existing aix block")
+PY2
+    grep -q '"WATCHMAN"' binding.gyp && { echo "@parcel/watcher: WATCHMAN still in binding.gyp" >&2; exit 1; }
   fi
 
   if grep -q 'bool isDir = ent->d_type == DT_DIR;' src/unix/legacy.cc; then

@@ -64,23 +64,38 @@ esac
 
 # 1c. @parcel/watcher must deliver events through subscribe() (upstream's brute-force backend
 # throws and takes the File Watcher process down with SIGABRT; the polling patch fixes that).
+# Ask for the "inotify" backend exactly like VS Code does when the shim reports linux: parcel then
+# falls back to "default", which must resolve to brute force without probing for watchman (that
+# probe popen()s a shell it never reaps: one zombie per File Watcher process).
 WDIR="$( mktemp -d "${TMPDIR:-/tmp}/verify_reh_watch.XXXXXX" )"
 cat > "${WDIR}/probe.js" <<'JS'
 const w = require(process.argv[2]); const fs = require('fs'); const dir = process.argv[3];
 const t = setTimeout(() => { console.log('TIMEOUT'); process.exit(3); }, 15000);
 w.subscribe(dir, (err, events) => {
   if (err) { console.log('ERROR ' + err.message); process.exit(2); }
-  if (events.some(e => e.path.endsWith('/probe.txt'))) { console.log('EVENT'); clearTimeout(t); process.exit(0); }
-}).then(() => fs.writeFileSync(dir + '/probe.txt', 'x'))
+  if (events.some(e => e.path.endsWith('/probe.txt'))) { console.log('EVENT'); clearTimeout(t); setTimeout(() => process.exit(0), 3000); }
+}, { backend: 'inotify' }).then(() => fs.writeFileSync(dir + '/probe.txt', 'x'))
   .catch(e => { console.log('REJECTED ' + e.message); process.exit(2); });
 JS
-WATCH_OUT="$( PARCEL_WATCHER_POLL_INTERVAL_MS=500 "${NODE}" "${WDIR}/probe.js" "${REH}/node_modules/@parcel/watcher" "${WDIR}" 2>&1 | tail -1 || true )"
+PARCEL_WATCHER_POLL_INTERVAL_MS=500 "${NODE}" "${WDIR}/probe.js" "${REH}/node_modules/@parcel/watcher" "${WDIR}" > "${WDIR}/out" 2>&1 &
+WPID=$!
+for (( i = 0; i < 20; i++ )); do
+  grep -qE 'EVENT|ERROR|REJECTED|TIMEOUT' "${WDIR}/out" 2> /dev/null && break
+  kill -0 "${WPID}" 2> /dev/null || break
+  sleep 1
+done
+WATCH_OUT="$( tail -1 "${WDIR}/out" 2> /dev/null || true )"
+# while the probe is still alive (it lingers 3 s after EVENT), look for unreaped children
+ZOMBIES="$( ps -eo pid,ppid,stat | awk -v p="${WPID}" '$2 == p && $3 ~ /Z/ { print $1 }' | tr '\n' ' ' )"
+wait "${WPID}" 2> /dev/null || true
 rm -rf "${WDIR}"
-if [[ "${WATCH_OUT}" == "EVENT" ]]; then
-  echo "verify_reh: @parcel/watcher subscribe delivers events"
-else
+if [[ "${WATCH_OUT}" != "EVENT" ]]; then
   echo "verify_reh: @parcel/watcher subscribe failed: ${WATCH_OUT}" >&2; exit 1
 fi
+if [[ -n "${ZOMBIES// /}" ]]; then
+  echo "verify_reh: @parcel/watcher left zombie children (watchman probe compiled in?): ${ZOMBIES}" >&2; exit 1
+fi
+echo "verify_reh: @parcel/watcher subscribe delivers events, no zombie children"
 
 # 1d. node-pty must spawn a shell and deliver its output (openpty/forkpty come from the shipped
 # libutil; LIBPATH from aix-env.sh). This is what the terminal and tasks depend on.
