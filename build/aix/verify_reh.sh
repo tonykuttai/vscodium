@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 #
 # Verify a packaged aix-ppc64 REH tree before it is archived: every native addon is a 64-bit
-# XCOFF object that loads under the bundled node, ripgrep runs, and the server boots to
-# "Extension host agent listening". Usage: build/aix/verify_reh.sh <reh-dir> [timeout-seconds]
+# XCOFF object that loads under the bundled node, the AIX shim and the polling watcher work,
+# node-pty spawns a shell, ripgrep runs, the server boots to "Extension host agent listening"
+# and answers GET /version, and nothing touched AHAFS.
+# Usage: build/aix/verify_reh.sh <reh-dir> [timeout-seconds]
 
 set -e
 
@@ -80,6 +82,25 @@ else
   echo "verify_reh: @parcel/watcher subscribe failed: ${WATCH_OUT}" >&2; exit 1
 fi
 
+# 1d. node-pty must spawn a shell and deliver its output (openpty/forkpty come from the shipped
+# libutil; LIBPATH from aix-env.sh). This is what the terminal and tasks depend on.
+PDIR="$( mktemp -d "${TMPDIR:-/tmp}/verify_reh_pty.XXXXXX" )"
+cat > "${PDIR}/probe.js" <<'JS'
+const pty = require(process.argv[2]);
+const t = setTimeout(() => { console.log('TIMEOUT'); process.exit(3); }, 20000);
+let out = '';
+const p = pty.spawn('/bin/sh', ['-c', 'echo pty-probe-$((40+2))'], { name: 'xterm', cols: 80, rows: 24, cwd: '/tmp', env: process.env });
+p.onData(d => { out += d; });
+p.onExit(() => { clearTimeout(t); console.log(out.includes('pty-probe-42') ? 'PTY_OK' : 'NO_OUTPUT ' + JSON.stringify(out)); process.exit(out.includes('pty-probe-42') ? 0 : 2); });
+JS
+PTY_OUT="$( "${NODE}" "${PDIR}/probe.js" "${REH}/node_modules/node-pty" 2>&1 | tail -1 || true )"
+rm -rf "${PDIR}"
+if [[ "${PTY_OUT}" == "PTY_OK" ]]; then
+  echo "verify_reh: node-pty spawns a shell and delivers output"
+else
+  echo "verify_reh: node-pty spawn failed: ${PTY_OUT}" >&2; exit 1
+fi
+
 # 2. ripgrep
 RG="${REH}/node_modules/@vscode/ripgrep-universal/bin/aix-ppc64/rg"
 [[ -x "${RG}" ]] || { echo "verify_reh: ${RG} missing" >&2; exit 1; }
@@ -119,9 +140,12 @@ else
       fail="server listens on ${PORT} but GET /version does not return its commit"
     fi
   fi
-  # the server and its children must not have touched AHAFS
-  if [[ -z "${fail}" && -d /aha/fs/modDir.monFactory ]]; then
-    MON="$( find "/aha/fs/modDir.monFactory${DATA}" -name '*.mon' 2> /dev/null | head -3 || true )"
+  # the server and its children must not have touched AHAFS: a directory watch creates
+  # /aha/fs/modDir.monFactory<dir>.mon, a single-file watch /aha/fs/modFile.monFactory<file>.mon
+  # (VS Code's non-recursive watcher watches files such as extensions.json directly). Monitor
+  # files persist after the watcher closes, so anything under our private data dir is ours.
+  if [[ -z "${fail}" && -d /aha/fs ]]; then
+    MON="$( find "/aha/fs/modDir.monFactory${DATA}" "/aha/fs/modFile.monFactory${DATA}" -name '*.mon' 2> /dev/null | head -3 || true )"
     [[ -z "${MON}" ]] || fail="server created AHAFS monitors (fs.watch shim inactive in a child?): ${MON}"
   fi
 fi
