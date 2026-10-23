@@ -1,6 +1,8 @@
 # Building the Remote Extension Host for IBM AIX (aix-ppc64)
 
-> Status: draft, being proven on AIX 7.3 TL4 with VSCodium 1.140.06880 (2026-10-23).
+> Proven on AIX 7.3 TL4 (wyvernden6aix73) with VSCodium 1.140.06880, 2026-10-23: the published
+> `vscodium-reh-aix-ppc64-1.140.06880.tar.gz` on [tonykuttai/vscodium-aix-server](https://github.com/tonykuttai/vscodium-aix-server/releases)
+> is built this way by the runner described there.
 
 AIX has no cross toolchain, container image or GitHub-hosted runner, so the AIX REH is built
 **natively on an AIX host** by the scripts in `build/aix/`, using the same `prepare_vscode.sh`,
@@ -18,7 +20,7 @@ patched.
 | Node.js matching `.nvmrc` (24.22.0) | runs gulp/esbuild/tsgo | `curl -O https://nodejs.org/dist/v24.22.0/node-v24.22.0-aix-ppc64.tar.gz`, extract under `~/local`, put `bin` first on `PATH` |
 | `jq` | `prepare_vscode.sh` | build 1.7.1 from source: `--disable-shared --enable-static --with-oniguruma=builtin`, 64-bit (`OBJECT_MODE=64 CC="gcc -maix64" AR="ar -X64"`), and patch `src/jv_alloc.c` so `malloc(0)` is never called (AIX returns NULL) |
 | portlibforaix `libutil.so.2` | node-pty (`openpty/forkpty/login_tty` are not in AIX libc) | `git clone https://github.com/tonykuttai/portlibforaix && make` → `~/local/portlibforaix/lib/libutil.so.2` |
-| an aix-ppc64 `rg` built from the ripgrep tag that `@vscode/ripgrep-universal` ships | `@vscode/ripgrep-universal` has no AIX binary | `build/aix/ripgrep.sh` (TODO: port of the old vsx ripgrep module; needs the IBM Open SDK for Rust extracted under `~/local`, `--features pcre2`) |
+| an aix-ppc64 `rg` built from the ripgrep tag that `@vscode/ripgrep-universal` ships | `@vscode/ripgrep-universal` has no AIX binary | `build/aix/ripgrep.sh` builds it (IBM Open SDK for Rust relocated under `~/local/RustSDK/1.86`, `--features pcre2`, cached per tag and rustc; `package_reh.sh` calls it when `VSCODE_AIX_RIPGREP` is unset) |
 
 Never export the runtime `LIBPATH` (what `bin/aix-env.sh` sets) in the shell that compiles:
 the Toolbox compiler binaries are 32-bit and will refuse to start with 64-bit runtime
