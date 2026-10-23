@@ -1,0 +1,82 @@
+name: test-node-linux
+
+# Linux baseline for VS Code's Node unit tests at the VS Code commit that
+# upstream/stable.json pins, with VSCodium's patches applied. The same tests run
+# on the AIX build host by hand; this job answers "does that test also fail on
+# Linux?" so AIX-specific failures can be told apart from upstream or
+# VSCodium-specific ones. Manual only: it takes about half an hour.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_glob:
+        description: 'Optional --runGlob for test/unit/node/index.js (empty = full run)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  test-node:
+    name: node unit tests on ubuntu (baseline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      APP_NAME: VSCodium
+      ASSETS_REPOSITORY: ${{ github.repository }}
+      BINARY_NAME: codium
+      GH_REPO_PATH: ${{ github.repository }}
+      ORG_NAME: VSCodium
+      OS_NAME: linux
+      VSCODE_QUALITY: stable
+      CI_BUILD: 'no'
+      MAX_OLD_SPACE_SIZE: '8192'
+      SKIP_NPM_INSTALL: 'yes'
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: tools and native build deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq build-essential python3 libx11-dev libxkbfile-dev libsecret-1-dev libkrb5-dev
+      - name: get_repo.sh + prepare_vscode.sh (VSCodium patches, no npm install)
+        run: |
+          . get_repo.sh
+          . version.sh
+          . prepare_vscode.sh
+      - name: npm ci (root, with scripts, so the test natives and typings exist)
+        working-directory: vscode
+        run: |
+          npm ci
+      - name: compile
+        working-directory: vscode
+        run: |
+          NODE_OPTIONS=--max-old-space-size=8192 npm run compile 2>&1 | tee ../compile.log
+      - name: test-node
+        working-directory: vscode
+        run: |
+          set +e
+          if [ -n "${{ github.event.inputs.run_glob }}" ]; then
+            node --max-old-space-size=8192 test/unit/node/index.js --runGlob '${{ github.event.inputs.run_glob }}' 2>&1 | tee ../test-node.log
+          else
+            node --max-old-space-size=8192 test/unit/node/index.js 2>&1 | tee ../test-node.log
+          fi
+          rc=${PIPESTATUS[0]}
+          echo "exit code: $rc" | tee -a ../test-node.log
+          sed -E 's/\x1b\[[0-9;]*m//g' ../test-node.log | awk '/^ *[0-9]+ (passing|failing|pending)/{print} /^ *[0-9]+ failing/{f=1} f && /^ *[0-9]+\) /{print}' > ../test-node-summary.txt
+          cat ../test-node-summary.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-node-linux
+          path: |
+            test-node.log
+            test-node-summary.txt
+            compile.log
+          retention-days: 30
