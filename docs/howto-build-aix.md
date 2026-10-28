@@ -62,16 +62,16 @@ at import time with Emscripten glue that assumes a little-endian host; the serve
 ## What the package contains that Linux does not
 
 - `bin/aix-env.sh`: puts the GCC runtime, `/opt/freeware/lib64` and node-pty's `lib/native-libs`
-  on `LIBPATH`; sourced by `bin/codium-server`, `bin/remote-cli/codium`, `bin/helpers/browser.sh`.
+   on `LIBPATH`; sourced by `bin/codium-server`, `bin/remote-cli/codium`, `bin/helpers/browser.sh`.
 - `aix-platform-override.cjs`: preloaded with `node -r` by the launchers and propagated to every child
-  process (extension host, pty host, file watcher) through `NODE_OPTIONS=--require` in `bin/aix-env.sh`.
-  It reports `process.platform === 'linux'` to the few server code paths that only know
-  linux/darwin/win32 (real platform to everything else, ripgrep-universal in particular) and replaces
-  `fs.watch`/`fs.promises.watch` with stat polling: libuv implements AIX `fs.watch` with AHAFS, whose
-  shared monitor pool can wedge the whole host. It is inert in processes that are not VS Code's.
+   process (extension host, pty host, file watcher) through `NODE_OPTIONS=--require` in `bin/aix-env.sh`.
+   It reports `process.platform === 'linux'` to the few server code paths that only know
+   linux/darwin/win32 (real platform to everything else, ripgrep-universal in particular) and replaces
+   `fs.watch`/`fs.promises.watch` with stat polling: libuv implements AIX `fs.watch` with AHAFS, whose
+   shared monitor pool can wedge the whole host. It is inert in processes that are not VS Code's.
 - `@parcel/watcher` built with `build/aix/parcel-watcher-polling.patch` (`BRUTE_FORCE_POLLING`): the
-  upstream brute-force backend cannot `subscribe()` (it aborts the File Watcher process), the patch adds
-  polling subscriptions (`PARCEL_WATCHER_POLL_INTERVAL_MS`, default 2000 ms).
+   upstream brute-force backend cannot `subscribe()` (it aborts the File Watcher process), the patch adds
+   polling subscriptions (`PARCEL_WATCHER_POLL_INTERVAL_MS`, default 2000 ms).
 - `node_modules/node-pty/lib/native-libs/libutil.{a,so.2}` from portlibforaix.
 
 ## Runtime requirements on the target AIX host

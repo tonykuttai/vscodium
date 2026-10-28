@@ -71,7 +71,7 @@ MM="$( awk '/^name = "memmap2"$/ {f=1; next} f && /^version = / {print $3; f=0; 
 if [[ -n "${MM}" ]]; then
   mkdir -p vendor
   if git clone -q --depth 1 --branch "v${MM}" https://github.com/RazrFalcon/memmap2-rs.git vendor/memmap2 2> /dev/null \
-     && grep -q 'madvise(self.ptr.offset(offset), len, advice)' vendor/memmap2/src/unix.rs; then
+    && grep -q 'madvise(self.ptr.offset(offset), len, advice)' vendor/memmap2/src/unix.rs; then
     sed -i 's/madvise(self\.ptr\.offset(offset), len, advice)/madvise(self.ptr.offset(offset) as libc::caddr_t, len, advice)/' vendor/memmap2/src/unix.rs
     printf '\n[patch.crates-io]\nmemmap2 = { path = "vendor/memmap2" }\n' >> Cargo.toml
     log "memmap2 ${MM} patched for AIX"

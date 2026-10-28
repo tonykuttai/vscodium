@@ -164,7 +164,7 @@ import re, sys
 path = sys.argv[1]
 src = open(path).read()
 new, n = re.subn(r"'libraries':\s*\[\s*'-lkrb5',\s*'-lgssapi_krb5'\s*\]",
-                 "'libraries': [ '<!@(krb5-config --libs gssapi)' ]", src, count=1)
+  "'libraries': [ '<!@(krb5-config --libs gssapi)' ]", src, count=1)
 if n != 1:
     sys.exit("kerberos: binding.gyp libraries block not found; update build/aix/fix-node-modules.sh")
 open(path, "w").write(new)
